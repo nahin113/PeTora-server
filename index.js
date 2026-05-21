@@ -101,38 +101,77 @@ async function run() {
       }
     });
 
-    app.post("/adoptionRequests", async (req, res) => {
+app.post("/adoptionRequests", async (req, res) => {
+  try {
+    const requestData = req.body;
+
+    const petRecord = await petsCollection.findOne({
+      _id: new ObjectId(requestData.petId),
+    });
+    if (!petRecord) {
+      return res.status(404).json({ error: "Target pet listing not found" });
+    }
+    if (petRecord.ownerEmail === requestData.requesterEmail) {
+      return res.status(403).json({
+        acknowledged: false,
+        error:
+          "Action denied. You cannot submit an adoption request for your own listing.",
+      });
+    }
+
+
+    const existingRequest = await adoptionCollection.findOne({
+      petId: requestData.petId,
+      requesterEmail: requestData.requesterEmail,
+    });
+
+    if (existingRequest) {
+
+      return res.status(409).json({
+        acknowledged: false,
+        isDuplicate: true, 
+        message:
+          "You have already submitted an adoption request for this companion.",
+      });
+    }
+
+  
+    const result = await adoptionCollection.insertOne(requestData);
+
+    if (result.acknowledged) {
+      await petsCollection.updateOne(
+        { _id: new ObjectId(requestData.petId) },
+        { $inc: { requestsCount: 1 } }
+      );
+    }
+
+    res.status(201).json(result);
+  } catch (error) {
+    console.error("Backend request security error:", error);
+    res
+      .status(500)
+      .json({ acknowledged: false, error: "Internal processing failure" });
+  }
+});
+
+
+    app.get("/myRequests", async (req, res) => {
       try {
-        const requestData = req.body;
-        const petRecord = await petsCollection.findOne({
-          _id: new ObjectId(requestData.petId),
-        });
-
-        if (!petRecord) {
+        const requesterEmail = req.query.email;
+        if (!requesterEmail) {
           return res
-            .status(404)
-            .json({ error: "Target pet listing not found" });
+            .status(400)
+            .json({ error: "Missing identity query parameter" });
         }
 
-        if (petRecord.ownerEmail === requestData.requesterEmail) {
-          return res.status(403).json({
-            acknowledged: false,
-            error:
-              "Action denied. You cannot submit an adoption request for your own listing.",
-          });
-        }
+    
+        const query = { requesterEmail: requesterEmail };
+        const results = await adoptionCollection.find(query).toArray();
 
-        const result = await adoptionCollection.insertOne(requestData);
-        if (result.acknowledged) {
-          await petsCollection.updateOne(
-            { _id: new ObjectId(requestData.petId) },
-            { $inc: { requestsCount: 1 } }
-          );
-        }
-        res.status(201).json(result);
+        res.status(200).json(results);
       } catch (error) {
-        console.error(error);
-        res.status(500).json({ acknowledged: false, error: "Error" });
+        console.error("Error", error);
+        res.status(500).json({ error: "Internal server error" });
       }
     });
 
