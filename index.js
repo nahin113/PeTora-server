@@ -17,9 +17,7 @@ app.listen(PORT, () => {
 
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
-
 const uri = process.env.MONGODB_URI;
-
 
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
 const client = new MongoClient(uri, {
@@ -30,8 +28,6 @@ const client = new MongoClient(uri, {
   },
 });
 
-
-
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
@@ -39,7 +35,56 @@ async function run() {
     await client.connect();
 
     const db = client.db("petora");
-    const destinationCollection = db.collection("pets");
+    const petsCollection = db.collection("pets");
+
+    app.post("/petsData", async (req, res) => {
+      const petData = req.body;
+      console.log(petData);
+      const result = await petsCollection.insertOne(petData);
+      res.json(result);
+    });
+
+    app.get("/petsData", async (req, res) => {
+      const result = await petsCollection.find().toArray();
+      res.json(result);
+    });
+
+
+
+    app.get("/myPets/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+
+        const query = { ownerEmail: email };
+
+        const result = await petsCollection.find(query).toArray();
+
+        res.status(200).json(result);
+      } catch (error) {
+        console.error("Error fetching user pets:", error);
+        res
+          .status(500)
+          .json({ error: "Failed to fetch listings for this user" });
+      }
+    });
+
+    app.delete("/petsData/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+
+        const result = await petsCollection.deleteOne(query);
+
+        res.status(200).json(result);
+      } catch (error) {
+        console.error("Error deleting pet document:", error);
+        res.status(500).json({
+          acknowledged: false,
+          error: "Failed to delete the listing",
+        });
+      }
+    });
+
 
 
     // Send a ping to confirm a successful connection
