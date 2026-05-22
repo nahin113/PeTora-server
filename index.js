@@ -233,9 +233,28 @@ async function run() {
         const { status } = req.body;
 
         const query = { _id: new ObjectId(id) };
-        const updateDoc = { $set: { status: status } };
 
+        const adoptionRequest = await adoptionCollection.findOne(query);
+
+        if (!adoptionRequest) {
+          return res.status(404).json({ error: "Adoption request not found" });
+        }
+
+        const updateDoc = { $set: { status: status } };
         const result = await adoptionCollection.updateOne(query, updateDoc);
+
+        if (result.modifiedCount > 0 && status === "Approved") {
+          const petId = adoptionRequest.petId;
+
+          const petQuery = ObjectId.isValid(petId)
+            ? { _id: new ObjectId(petId) }
+            : { _id: petId };
+
+          await petsCollection.updateOne(petQuery, {
+            $set: { status: "Adopted" },
+          });
+        }
+
         res.status(200).json(result);
       } catch (error) {
         console.error("Error updating status:", error);
