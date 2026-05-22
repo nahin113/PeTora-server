@@ -16,10 +16,9 @@ app.listen(PORT, () => {
 });
 
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
-
+const { createRemoteJWKSet, jwtVerify } = require("jose-cjs");
 const uri = process.env.MONGODB_URI;
 
-// Create a MongoClient with a MongoClientOptions object to set the Stable API version
 const client = new MongoClient(uri, {
   serverApi: {
     version: ServerApiVersion.v1,
@@ -28,11 +27,35 @@ const client = new MongoClient(uri, {
   },
 });
 
+const JWKS = createRemoteJWKSet(
+  new URL(`${process.env.BETTER_AUTH_URL}api/auth/jwks`)
+);
+
+const verifyToken = async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  const token = authHeader.split(" ")[1];
+
+  if (!token) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  try {
+    const { payload } = await jwtVerify(token, JWKS);
+    console.log(payload);
+    next();
+  } catch (error) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+};
+
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
     // comment this line for deploy
-    await client.connect();
+    // await client.connect();
 
     const db = client.db("petora");
     const petsCollection = db.collection("pets");
@@ -53,11 +76,8 @@ async function run() {
     app.get("/myPets/:email", async (req, res) => {
       try {
         const email = req.params.email;
-
         const query = { ownerEmail: email };
-
         const result = await petsCollection.find(query).toArray();
-
         res.status(200).json(result);
       } catch (error) {
         console.error("Error fetching user pets:", error);
@@ -67,28 +87,10 @@ async function run() {
       }
     });
 
-    // app.delete("/petsData/:id", async (req, res) => {
-    //   try {
-    //     const id = req.params.id;
-    //     const query = { _id: new ObjectId(id) };
-
-    //     const result = await petsCollection.deleteOne(query);
-
-    //     res.status(200).json(result);
-    //   } catch (error) {
-    //     console.error("Error deleting pet document:", error);
-    //     res.status(500).json({
-    //       acknowledged: false,
-    //       error: "Failed to delete the listing",
-    //     });
-    //   }
-    // });
-
-    app.delete("/petsData/:id", async (req, res) => {
+    app.delete("/petsData/:id", verifyToken, async (req, res) => {
       try {
         const id = req.params.id;
         const query = { _id: new ObjectId(id) };
-
         const result = await petsCollection.deleteOne(query);
 
         if (result.deletedCount > 0) {
@@ -108,7 +110,7 @@ async function run() {
       }
     });
 
-    app.get("/petsData/:id", async (req, res) => {
+    app.get("/petsData/:id", verifyToken, async (req, res) => {
       try {
         const id = req.params.id;
         const query = { _id: new ObjectId(id) };
@@ -125,10 +127,9 @@ async function run() {
       }
     });
 
-    app.post("/adoptionRequests", async (req, res) => {
+    app.post("/adoptionRequests", verifyToken, async (req, res) => {
       try {
         const requestData = req.body;
-
         const petRecord = await petsCollection.findOne({
           _id: new ObjectId(requestData.petId),
         });
@@ -231,9 +232,7 @@ async function run() {
       try {
         const id = req.params.id;
         const { status } = req.body;
-
         const query = { _id: new ObjectId(id) };
-
         const adoptionRequest = await adoptionCollection.findOne(query);
 
         if (!adoptionRequest) {
@@ -245,7 +244,6 @@ async function run() {
 
         if (result.modifiedCount > 0 && status === "Approved") {
           const petId = adoptionRequest.petId;
-
           const petQuery = ObjectId.isValid(petId)
             ? { _id: new ObjectId(petId) }
             : { _id: petId };
@@ -253,6 +251,22 @@ async function run() {
           await petsCollection.updateOne(petQuery, {
             $set: { status: "Adopted" },
           });
+
+          await adoptionCollection.updateMany(
+            {
+              _id: { $ne: new ObjectId(id) },
+              status: "Pending",
+              $or: [
+                { petId: petId },
+                {
+                  petId: ObjectId.isValid(petId) ? new ObjectId(petId) : petId,
+                },
+              ],
+            },
+            {
+              $set: { status: "Rejected" },
+            }
+          );
         }
 
         res.status(200).json(result);
@@ -280,12 +294,9 @@ async function run() {
       try {
         const id = req.params.id;
         const updatedData = req.body;
-
         delete updatedData._id;
-
         const query = { _id: new ObjectId(id) };
         const updateDoc = { $set: updatedData };
-
         const result = await petsCollection.updateOne(query, updateDoc);
         res.status(200).json(result);
       } catch (error) {
@@ -299,7 +310,6 @@ async function run() {
         const id = req.params.id;
         const query = { _id: new ObjectId(id) };
         const result = await adoptionCollection.deleteOne(query);
-
         res.status(200).json(result);
       } catch (error) {
         console.error("Error deleting adoption request:", error);
@@ -307,7 +317,7 @@ async function run() {
       }
     });
 
-    app.patch("/petsData/:id", async (req, res) => {
+    app.patch("/petsData/:id", verifyToken, async (req, res) => {
       try {
         const id = req.params.id;
         const updatedData = req.body;
@@ -317,6 +327,7 @@ async function run() {
           $set: updatedData,
         };
         const result = await petsCollection.updateOne(filter, updateDoc);
+
         if (result.modifiedCount > 0) {
           const cascadeUpdateFields = {};
           if (updatedData.name) cascadeUpdateFields.petName = updatedData.name;
@@ -355,7 +366,7 @@ async function run() {
 
     // Send a ping to confirm a successful connection
     // comment this line for deployment
-    await client.db("admin").command({ ping: 1 });
+    // await client.db("admin").command({ ping: 1 });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
     );
