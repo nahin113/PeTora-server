@@ -76,8 +76,11 @@ async function run() {
     app.get("/myPets/:email", async (req, res) => {
       try {
         const email = req.params.email;
+
         const query = { ownerEmail: email };
+
         const result = await petsCollection.find(query).toArray();
+
         res.status(200).json(result);
       } catch (error) {
         console.error("Error fetching user pets:", error);
@@ -91,6 +94,7 @@ async function run() {
       try {
         const id = req.params.id;
         const query = { _id: new ObjectId(id) };
+
         const result = await petsCollection.deleteOne(query);
 
         if (result.deletedCount > 0) {
@@ -130,6 +134,7 @@ async function run() {
     app.post("/adoptionRequests", verifyToken, async (req, res) => {
       try {
         const requestData = req.body;
+
         const petRecord = await petsCollection.findOne({
           _id: new ObjectId(requestData.petId),
         });
@@ -232,7 +237,9 @@ async function run() {
       try {
         const id = req.params.id;
         const { status } = req.body;
+
         const query = { _id: new ObjectId(id) };
+
         const adoptionRequest = await adoptionCollection.findOne(query);
 
         if (!adoptionRequest) {
@@ -244,6 +251,7 @@ async function run() {
 
         if (result.modifiedCount > 0 && status === "Approved") {
           const petId = adoptionRequest.petId;
+
           const petQuery = ObjectId.isValid(petId)
             ? { _id: new ObjectId(petId) }
             : { _id: petId };
@@ -294,9 +302,12 @@ async function run() {
       try {
         const id = req.params.id;
         const updatedData = req.body;
+
         delete updatedData._id;
+
         const query = { _id: new ObjectId(id) };
         const updateDoc = { $set: updatedData };
+
         const result = await petsCollection.updateOne(query, updateDoc);
         res.status(200).json(result);
       } catch (error) {
@@ -310,6 +321,7 @@ async function run() {
         const id = req.params.id;
         const query = { _id: new ObjectId(id) };
         const result = await adoptionCollection.deleteOne(query);
+
         res.status(200).json(result);
       } catch (error) {
         console.error("Error deleting adoption request:", error);
@@ -327,7 +339,6 @@ async function run() {
           $set: updatedData,
         };
         const result = await petsCollection.updateOne(filter, updateDoc);
-
         if (result.modifiedCount > 0) {
           const cascadeUpdateFields = {};
           if (updatedData.name) cascadeUpdateFields.petName = updatedData.name;
