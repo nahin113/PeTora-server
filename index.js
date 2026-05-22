@@ -67,12 +67,36 @@ async function run() {
       }
     });
 
+    // app.delete("/petsData/:id", async (req, res) => {
+    //   try {
+    //     const id = req.params.id;
+    //     const query = { _id: new ObjectId(id) };
+
+    //     const result = await petsCollection.deleteOne(query);
+
+    //     res.status(200).json(result);
+    //   } catch (error) {
+    //     console.error("Error deleting pet document:", error);
+    //     res.status(500).json({
+    //       acknowledged: false,
+    //       error: "Failed to delete the listing",
+    //     });
+    //   }
+    // });
+
     app.delete("/petsData/:id", async (req, res) => {
       try {
         const id = req.params.id;
         const query = { _id: new ObjectId(id) };
 
         const result = await petsCollection.deleteOne(query);
+
+        if (result.deletedCount > 0) {
+          await adoptionCollection.updateMany(
+            { petId: id },
+            { $set: { status: "Removed" } }
+          );
+        }
 
         res.status(200).json(result);
       } catch (error) {
@@ -153,27 +177,23 @@ async function run() {
       }
     });
 
-   
     app.get("/petsData", async (req, res) => {
       try {
         const { search, species } = req.query;
         let query = {};
 
-    
         if (search) {
           query.name = { $regex: search, $options: "i" };
         }
 
-       
         if (species && species !== "all") {
-       
           const speciesList = species.split(",");
           query.species = {
             $in: speciesList.map((s) => new RegExp(`^${s}$`, "i")),
           };
         }
 
-        const petsCollection = database.collection("pets"); 
+        const petsCollection = database.collection("pets");
         const petsData = await petsCollection
           .find(query)
           .sort(sortCriteria)
@@ -188,7 +208,132 @@ async function run() {
       }
     });
 
-    
+    app.get("/myRequests", async (req, res) => {
+      try {
+        const requesterEmail = req.query.email;
+        if (!requesterEmail) {
+          return res
+            .status(400)
+            .json({ error: "Missing identity query parameter" });
+        }
+
+        const query = { requesterEmail: requesterEmail };
+        const results = await adoptionCollection.find(query).toArray();
+
+        res.status(200).json(results);
+      } catch (error) {
+        console.error("Error", error);
+        res.status(500).json({ error: "Internal server error" });
+      }
+    });
+
+    app.patch("/adoptionRequests/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const { status } = req.body;
+
+        const query = { _id: new ObjectId(id) };
+        const updateDoc = { $set: { status: status } };
+
+        const result = await adoptionCollection.updateOne(query, updateDoc);
+        res.status(200).json(result);
+      } catch (error) {
+        console.error("Error updating status:", error);
+        res.status(500).json({ error: "Failed to update request status" });
+      }
+    });
+
+    app.get("/adoptionRequests/pet/:petId", async (req, res) => {
+      try {
+        const petId = req.params.petId;
+        const query = { petId: petId };
+        const result = await adoptionCollection.find(query).toArray();
+        res.status(200).json(result);
+      } catch (error) {
+        console.error("Error fetching pet requests:", error);
+        res
+          .status(500)
+          .json({ error: "Failed to fetch requests for this pet" });
+      }
+    });
+
+    app.put("/petsData/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const updatedData = req.body;
+
+        delete updatedData._id;
+
+        const query = { _id: new ObjectId(id) };
+        const updateDoc = { $set: updatedData };
+
+        const result = await petsCollection.updateOne(query, updateDoc);
+        res.status(200).json(result);
+      } catch (error) {
+        console.error("Error updating pet profile:", error);
+        res.status(500).json({ error: "Failed to update pet data" });
+      }
+    });
+
+    app.delete("/adoptionRequests/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const result = await adoptionCollection.deleteOne(query);
+
+        res.status(200).json(result);
+      } catch (error) {
+        console.error("Error deleting adoption request:", error);
+        res.status(500).json({ error: "Failed to delete request" });
+      }
+    });
+
+    app.patch("/petsData/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const updatedData = req.body;
+        delete updatedData._id;
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $set: updatedData,
+        };
+        const result = await petsCollection.updateOne(filter, updateDoc);
+        if (result.modifiedCount > 0) {
+          const cascadeUpdateFields = {};
+          if (updatedData.name) cascadeUpdateFields.petName = updatedData.name;
+          if (updatedData.imageUrl)
+            cascadeUpdateFields.petImage = updatedData.imageUrl;
+          if (updatedData.breed)
+            cascadeUpdateFields.petBreed = updatedData.breed;
+          if (updatedData.age) cascadeUpdateFields.petAge = updatedData.age;
+          if (updatedData.gender)
+            cascadeUpdateFields.petGender = updatedData.gender;
+          if (updatedData.adoptionFee)
+            cascadeUpdateFields.adoptionFee = updatedData.adoptionFee;
+
+          if (Object.keys(cascadeUpdateFields).length > 0) {
+            await adoptionCollection.updateMany(
+              {
+                $or: [{ petId: id }, { petId: new ObjectId(id) }],
+              },
+              {
+                $set: cascadeUpdateFields,
+              }
+            );
+          }
+        }
+
+        res.send(result);
+      } catch (error) {
+        console.error("Error updating pet and matching requests:", error);
+        res.status(500).send({
+          acknowledged: false,
+          message: "Internal Server Error",
+          error: error.message,
+        });
+      }
+    });
+
     // Send a ping to confirm a successful connection
     // comment this line for deployment
     await client.db("admin").command({ ping: 1 });
